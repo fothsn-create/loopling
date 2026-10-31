@@ -130,6 +130,13 @@ h2.title { margin: 0; font: 900 clamp(1.7rem, 6vw, 2.4rem)/1.1 var(--display); t
 .zone-stars { display: inline-flex; align-items: center; gap: 4px; color: var(--sun); font: 900 .95rem/1 var(--display); font-variant-numeric: tabular-nums; }
 .zone-stars svg { width: 16px; height: 16px; fill: var(--sun); }
 .zone > .fine { padding: 4px 16px 16px; text-align: left; }
+.zone > .fine svg { width: 1em; height: 1em; vertical-align: -.14em; margin-right: 5px; fill: currentColor; }
+/* the full game: the one thing for sale, set apart from the zones but just as calm */
+.full-card { border-color: var(--peach); align-items: center; gap: 10px; padding-bottom: 16px; }
+.full-card .zone-head { align-self: stretch; }
+.full-card .sub { margin: 0; padding: 0 16px; }
+.full-card > .fine { padding: 0 16px; text-align: center; }
+a.btn { text-decoration: none; }
 .lvls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 8px 12px 14px; }
 .lvl { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 4px 9px; border-radius: 16px; border: 2px solid var(--line); background: rgba(0, 0, 0, .2); color: var(--ink); cursor: pointer; min-width: 0; touch-action: manipulation; }
 .lvl:active { transform: scale(.95); }
@@ -369,6 +376,7 @@ const Save = {
       tut: false,
       stickers: [], garden: 0,
       adv: {}, // Adventure: stars won per level, keyed "zone-level"
+      full: false, // the full game (see full.js)
     };
   },
   load() {
@@ -738,6 +746,7 @@ const HATS = [
   { id: 'wizard', name: 'Wizard Hat', price: 420 },
   { id: 'crown', name: 'Crown', price: 600 },
   { id: 'halo', name: 'Halo', price: 800 },
+  { id: 'heart', name: 'Thank-you Heart', price: 0, full: true }, // comes with the full game
   { id: 'pumpkin', name: 'Pumpkin', price: 0, season: 'halloween' },
   { id: 'santa', name: 'Santa Hat', price: 0, season: 'winter' },
 ];
@@ -960,6 +969,15 @@ function drawHat(ctx, id, r, t) {
     drawGlow(ctx, 0, hy, r * 0.9, '#fff3a8', 0.6);
     ctx.strokeStyle = '#ffe680'; ctx.lineWidth = r * 0.13;
     ctx.beginPath(); ctx.ellipse(0, hy, r * 0.55, r * 0.16, 0, 0, TAU); ctx.stroke();
+  } else if (id === 'heart') {
+    // a little heart clip, beating gently
+    const hx = r * 0.42, hy = top + r * 0.02, k = r * 0.36 * (1 + Math.sin(t * 4) * 0.05);
+    ctx.fillStyle = '#ff5c9a'; ctx.strokeStyle = '#b8245f'; ctx.lineWidth = r * 0.06;
+    ctx.beginPath(); ctx.moveTo(hx, hy + k * 0.85);
+    ctx.bezierCurveTo(hx - k * 1.25, hy + k * 0.05, hx - k * 0.7, hy - k * 0.95, hx, hy - k * 0.35);
+    ctx.bezierCurveTo(hx + k * 0.7, hy - k * 0.95, hx + k * 1.25, hy + k * 0.05, hx, hy + k * 0.85);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffd3e6'; circle(ctx, hx - k * 0.36, hy - k * 0.28, k * 0.15); ctx.fill();
   } else if (id === 'pumpkin') {
     const py = top - r * 0.14;
     ctx.fillStyle = '#ff9124'; ctx.strokeStyle = '#b8560e'; ctx.lineWidth = r * 0.06;
@@ -3486,8 +3504,9 @@ const LEVEL_TIME = 60;
 const Levels = {
   id(z, i) { return `${z}-${i}`; },
   stars(z, i) { return Save.data.adv[this.id(z, i)] || 0; },
-  // the first level of a zone opens when the boss before it is beaten; the rest open one by one
-  open(z, i) { return i > 0 ? this.stars(z, i - 1) > 0 : z === 0 || this.stars(z - 1, 3) > 0; },
+  // the first level of a zone opens when the boss before it is beaten; the rest open one by one.
+  // Zones past the free ones also need the full game.
+  open(z, i) { return Full.zoneOpen(z) && (i > 0 ? this.stars(z, i - 1) > 0 : z === 0 || this.stars(z - 1, 3) > 0); },
   zoneStars(z) { let n = 0; for (let i = 0; i < 4; i++) n += this.stars(z, i); return n; },
   total() { let n = 0; for (let z = 0; z < STAGES.length; z++) n += this.zoneStars(z); return n; },
   // the level to suggest next: the first one that is open but not yet won
@@ -3539,6 +3558,50 @@ const Levels = {
     const dust = gained * (10 + L.zone * 3) + (first ? (L.boss ? 80 + L.zone * 10 : 20 + L.zone * 4) : 0);
     Save.data.dust += dust; Save.save();
     return { dust, first, gained };
+  },
+};
+
+// ===== full.js =====
+// ---------- the full game: Adventure zones 3 to 8 ----------
+// Endless Play, Chill and the first FREE_ZONES Adventure zones are free everywhere. The rest of
+// Adventure is the full game: one purchase through Google Play, in the Android app only. The app
+// passes on what Google Play says (Loopling.store), and the save keeps a copy so the full game stays
+// open with no connection. On the website the full game isn't for sale: it points to the app.
+const FREE_ZONES = 2;
+const PLAY_URL = ''; // Loopling's Google Play page once it is public: the website then links to it
+
+const Full = {
+  price: '',       // Google Play's price in the player's own currency, once the app has it
+  pending: false,  // bought, but the payment hasn't gone through yet
+  get owned() { return !!Save.data.full; },
+  get forSale() { return !!(window.LooplingAndroid && LooplingAndroid.buy); },
+  zoneOpen(z) { return z < FREE_ZONES || this.owned; },
+  boot() {
+    if (!this.forSale) return;
+    try { this.store(JSON.parse(LooplingAndroid.store() || '{}')); } catch (e) { /* the app has nothing to say yet */ }
+  },
+  buy() { if (this.forSale) LooplingAndroid.buy(); },
+  // From the Android app: {price}, {owned}, {pending}, or {event: 'cancelled' | 'error' | 'unavailable'}.
+  store(m) {
+    if (m.price) this.price = m.price;
+    if ('pending' in m) this.pending = !!m.pending;
+    if ('owned' in m) this.set(!!m.owned);
+    if (m.event === 'unavailable') UI.toast("Google Play isn't available right now. Try again later.", 'lock');
+    else if (m.event === 'error') UI.toast("That didn't work. Nothing was paid, so try again later.", 'lock');
+    if (UI.cur === 'adventure' && App.state === 'menu') UI.show('adventure');
+  },
+  set(owned) {
+    const s = Save.data;
+    if (owned === !!s.full) return;
+    s.full = owned;
+    if (owned) {
+      this.pending = false;
+      if (!s.owned.hat.includes('heart')) s.owned.hat.push('heart');
+      UI.toast('Thank you! The full game is open, and your Thank-you Heart hat is in the Shop.', 'star');
+      Sound.fanfare();
+      if (App.demo) App.demo.fx.confetti(App.demo.W / 2, App.demo.H * 0.3, 90);
+    }
+    Save.save();
   },
 };
 
@@ -3957,21 +4020,45 @@ const UI = {
       return el('section', { class: 'zone' + (open ? '' : ' locked'), id: 'zone-' + z },
         art,
         el('div', { class: 'zone-head' }, el('b', null, `${z + 1}. ${st.name}`), el('span', { class: 'zone-stars', html: icon('star') + `${Levels.zoneStars(z)}/12` })),
-        open ? el('div', { class: 'lvls' }, lvls) : el('p', { class: 'fine' }, `Cheer up the ${BOSSES[STAGES[z - 1].boss].name} to open this zone.`));
+        open ? el('div', { class: 'lvls' }, lvls)
+          : el('p', { class: 'fine', html: Full.zoneOpen(z) ? `Cheer up the ${BOSSES[STAGES[z - 1].boss].name} to open this zone.` : icon('lock') + 'Part of the full game.' }));
     });
+    if (!Full.owned) zones.splice(FREE_ZONES, 0, this.fullCard());
     const s = el('section', { class: 'screen' }, this.head('Adventure'),
       el('p', { class: 'sub' }, 'Win levels for up to three stars each. Cheer up each zone\'s boss to open the next zone.'),
       el('div', { class: 'zones' }, zones));
-    if (next && next.z > 0) setTimeout(() => { const n = s.querySelector('#zone-' + next.z); if (n && n.isConnected) n.scrollIntoView({ block: 'center' }); }, 0);
+    // scroll to where the player is up to: the next level, or the full game once the free zones are done
+    const to = next && next.z > 0 ? '#zone-' + next.z : !next && !Full.owned ? '#full-card' : null;
+    if (to) setTimeout(() => { const n = s.querySelector(to); if (n && n.isConnected) n.scrollIntoView({ block: 'center' }); }, 0);
     return s;
+  },
+  // The one thing in Loopling that costs money, so it stays calm: no timers, no pop-ups, and a
+  // reminder to ask a grown-up. Google Play shows the price and asks before anything is paid.
+  fullCard() {
+    const more = STAGES.length - FREE_ZONES;
+    const buy = Full.pending ? [el('p', { class: 'fine' }, 'Waiting for the payment to go through. The full game opens as soon as it does.')]
+      : Full.forSale ? [
+        el('button', { class: 'btn peach wide', onclick: this.tap(() => Full.buy()), html: icon('star') + (Full.price ? `Unlock it all · ${Full.price}` : 'Unlock the full game') }),
+        el('p', { class: 'fine' }, 'Ask a grown-up first. Google Play shows the price and asks before anything is paid.')]
+      : PLAY_URL ? [
+        el('p', { class: 'fine' }, 'The full game is in the Loopling app for Android.'),
+        el('a', { class: 'btn peach wide', href: PLAY_URL, target: '_blank', rel: 'noopener', html: icon('play') + 'Get it on Google Play' })]
+      : [el('p', { class: 'fine' }, 'The full game is in the Loopling app for Android, coming soon to Google Play.')];
+    return el('section', { class: 'zone full-card', id: 'full-card' },
+      el('div', { class: 'zone-head' }, el('b', null, 'The full game'), el('span', { class: 'zone-stars', html: icon('star') + 'One payment' })),
+      el('p', { class: 'sub' }, `${more} more zones, ${more * 4} more levels and ${more} more bosses to cheer up, plus a Thank-you Heart hat. No adverts, and nothing else to buy.`),
+      buy);
   },
   s_level(r) {
     const L = r.L, z = L.zone, last = z === STAGES.length - 1 && L.boss;
-    const after = !r.win ? null : L.index < 3 ? { z, i: L.index + 1 } : z + 1 < STAGES.length ? { z: z + 1, i: 0 } : null;
+    let after = !r.win ? null : L.index < 3 ? { z, i: L.index + 1 } : z + 1 < STAGES.length ? { z: z + 1, i: 0 } : null;
+    const paid = !!after && !Full.zoneOpen(after.z); // the next level is in the full game
+    if (paid) after = null;
     const title = r.win ? (last ? 'You saved the sky!' : L.boss ? 'Boss cheered up!' : pick(['Level complete!', 'You did it!', 'Brilliant!']))
       : r.why === 'time' ? "Time's up!" : 'Out of hearts!';
     const tip = !r.win ? (r.why === 'time' ? `You got ${Levels.progressText(L)}. So close, have another go!` : 'Watch out for bumps, and try again!')
       : last ? 'King Grump is smiling at last, and so is every zone. You are a Loopling legend!'
+      : paid ? `You've cheered up every free zone! The full game has ${STAGES.length - FREE_ZONES} more to explore.`
       : r.stars === 3 ? 'Three stars. Amazing!' : L.boss ? 'Lose fewer hearts for more stars.' : 'Finish with more time to spare for more stars.';
     return el('section', { class: 'screen dim' },
       el('div', { class: 'spacer' }),
@@ -3983,9 +4070,10 @@ const UI = {
       r.dust ? el('div', { class: 'earn', html: `+${fmt(r.dust)} ${icon('star')}` }) : null,
       r.run.stickers.length ? el('p', { class: 'fine', style: 'color:var(--sun)' }, 'New stickers: ' + r.run.stickers.map((id) => STICKERS.find((x) => x.id === id).name).join(', ')) : null,
       after ? el('button', { class: 'btn big', 'data-focus': true, onclick: this.tap(() => App.playLevel(after.z, after.i)), html: icon('play') + 'Next level' })
+        : paid ? el('button', { class: 'btn big', 'data-focus': true, onclick: this.tap(() => App.home('adventure')), html: icon('map') + 'See the full game' })
         : el('button', { class: 'btn big', 'data-focus': true, onclick: this.tap(() => App.playLevel(z, L.index)), html: icon('retry') + (r.win ? 'Play again' : 'Try again') }),
       el('div', { class: 'row' },
-        after ? el('button', { class: 'btn sky', onclick: this.tap(() => App.playLevel(z, L.index)), html: icon('retry') + 'Replay' }) : null,
+        after || paid ? el('button', { class: 'btn sky', onclick: this.tap(() => App.playLevel(z, L.index)), html: icon('retry') + 'Replay' }) : null,
         el('button', { class: 'btn lilac', onclick: this.tap(() => App.home('adventure')), html: icon('map') + 'Map' })),
       el('div', { class: 'spacer' }));
   },
@@ -4020,19 +4108,21 @@ const UI = {
   grid(cat) {
     const list = CATS[cat], s = Save.data, sel = this.shopSel || s.eq[cat];
     const cards = list.map((item) => {
-      const owned = s.owned[cat].includes(item.id), on = s.eq[cat] === item.id, seasonal = item.season && !owned;
+      const owned = s.owned[cat].includes(item.id), on = s.eq[cat] === item.id, seasonal = item.season && !owned, gift = item.full && !owned;
       const c = el('canvas', { width: 144, height: 144, 'aria-hidden': 'true' });
       this.thumb(c, cat, item.id);
       return el('button', { class: `card ${owned ? 'owned' : 'locked'}${on ? ' equipped' : ''}${sel === item.id ? ' sel' : ''}`,
-        'aria-label': `${item.name}, ${on ? 'wearing' : owned ? 'owned' : seasonal ? 'seasonal gift' : item.price + ' stardust'}`, onclick: this.tap(() => this.choose(cat, item)) },
+        'aria-label': `${item.name}, ${on ? 'wearing' : owned ? 'owned' : seasonal ? 'seasonal gift' : gift ? 'comes with the full game' : item.price + ' stardust'}`, onclick: this.tap(() => this.choose(cat, item)) },
         c, el('span', null, item.name),
-        el('span', { class: 'price', html: on ? 'Wearing' : owned ? 'Owned' : seasonal ? 'Seasonal' : icon('star') + fmt(item.price) }));
+        el('span', { class: 'price', html: on ? 'Wearing' : owned ? 'Owned' : seasonal ? 'Seasonal' : gift ? 'Full game' : icon('star') + fmt(item.price) }));
     });
     const out = [el('div', { class: 'grid' }, cards)];
     const item = byId(list, sel);
     if (item.season && !s.owned[cat].includes(item.id)) {
       out.unshift(el('div', { class: 'buybar' }, el('div', null, el('b', null, item.name),
         el('small', null, item.season === 'halloween' ? 'A free gift that comes back every Halloween.' : 'A free gift that comes back every December.'))));
+    } else if (item.full && !s.owned[cat].includes(item.id)) {
+      out.unshift(el('div', { class: 'buybar' }, el('div', null, el('b', null, item.name), el('small', null, 'A thank-you that comes with the full game.'))));
     } else if (!s.owned[cat].includes(item.id)) {
       const can = s.dust >= item.price;
       out.unshift(el('div', { class: 'buybar' },
@@ -4112,6 +4202,7 @@ const App = {
     Input.onKey = (code) => this.key(code);
     addEventListener('pointerdown', () => Sound.unlock());
     UI.init();
+    Full.boot();
     Season.init();
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -4124,8 +4215,10 @@ const App = {
       else Sound.suspend(false);
     });
     if (window.LOOPLING_PWA && 'serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
-    // the Android app (android/) calls these for its back button and when it goes into the background
-    window.Loopling = { back: () => this.back(), hide: () => { if (this.state === 'play') this.pause(); Sound.suspend(true); }, show: () => Sound.suspend(false) };
+    // the Android app (android/) calls these for its back button, when it goes into the background,
+    // and with what Google Play says about the full game
+    window.Loopling = { back: () => this.back(), hide: () => { if (this.state === 'play') this.pause(); Sound.suspend(true); }, show: () => Sound.suspend(false),
+      store: (m) => Full.store(m) };
     requestAnimationFrame((ts) => this.frame(ts));
   },
   resize() {
