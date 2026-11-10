@@ -1,0 +1,77 @@
+plugins {
+    id 'com.android.application' version '8.13.2'
+}
+
+def uploadKeyConfigured = System.getenv('LOOPLING_KEYSTORE_PATH') != null
+// Optional, private access code for Google Play reviewers (12-64 letters/numbers/hyphens).
+def reviewCode = System.getenv('LOOPLING_REVIEWER_CODE') ?: ''
+if (reviewCode && !reviewCode.matches('[A-Za-z0-9-]{12,64}')) {
+    throw new GradleException('LOOPLING_REVIEWER_CODE must contain 12-64 letters, numbers or hyphens.')
+}
+
+android {
+    namespace 'com.fothsn.loopling'
+    compileSdk 36
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    defaultConfig {
+        applicationId 'com.fothsn.loopling'
+        minSdk 24
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        buildConfigField 'String', 'REVIEWER_CODE', "\"${reviewCode}\""
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        if (uploadKeyConfigured) {
+            upload {
+                storeFile file(System.getenv('LOOPLING_KEYSTORE_PATH'))
+                storePassword System.getenv('LOOPLING_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('LOOPLING_KEY_ALIAS')
+                keyPassword System.getenv('LOOPLING_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Never put signing files or passwords in the public GitHub repository.
+            if (uploadKeyConfigured) signingConfig signingConfigs.upload
+        }
+    }
+}
+
+// Bundle the game's real GitHub source code inside the installed app.
+// The Android build must live in the 'android' folder of the Loopling repository.
+def gameRoot = rootProject.file('..')
+def syncGameAssets = tasks.register('syncGameAssets', Copy) {
+    from("${gameRoot}/index.html") {
+        filter { String line -> line.replace('window.LOOPLING_PWA = true;', 'window.LOOPLING_PWA = false;') }
+    }
+    from("${gameRoot}/manifest.webmanifest")
+    from("${gameRoot}/privacy.html")
+    from("${gameRoot}/icons") { into('icons') }
+    into(layout.buildDirectory.dir('generated/loopling-assets'))
+    doFirst {
+        if (!gameRoot.toPath().resolve('index.html').toFile().exists()) {
+            throw new GradleException('Place android/ next to index.html in your Loopling GitHub repository before building.')
+        }
+    }
+}
+android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/loopling-assets'))
+tasks.named('preBuild').configure { dependsOn(syncGameAssets) }
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.18.0'
+    implementation 'com.android.billingclient:billing:9.1.0'
+}

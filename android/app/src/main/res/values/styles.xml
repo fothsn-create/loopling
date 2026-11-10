@@ -1,0 +1,9 @@
+<resources>
+    <style name="LooplingTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#140F33</item>
+        <item name="android:navigationBarColor">#140F33</item>
+        <item name="android:statusBarColor">#140F33</item>
+    </style>
+</resources>
