@@ -72,6 +72,8 @@ android.sourceSets.main.assets.srcDir(layout.buildDirectory.dir('generated/loopl
 tasks.named('preBuild').configure { dependsOn(syncGameAssets) }
 
 dependencies {
+    // Keep transitive Kotlin JDK libraries aligned with the merged 1.8+ stdlib.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     implementation 'androidx.webkit:webkit:1.18.0'
     implementation 'com.android.billingclient:billing:9.1.0'
 }
