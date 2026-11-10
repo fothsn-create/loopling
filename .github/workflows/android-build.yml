@@ -27,6 +27,9 @@ jobs:
           java-version: '17'
       - name: Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Override the default, which includes the obsolete SDK 'tools' package.
+          packages: 'platform-tools'
       - name: Install Android 16 SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Gradle 8.13
